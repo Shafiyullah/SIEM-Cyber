@@ -6,8 +6,9 @@ Welcome to the **Next-Gen AI SIEM** (Security Information and Event Management) 
 
 - **⚡ High Performance**: Built on a fully asynchronous architecture for maximum speed and throughput.
 - **🧠 AI Analysis**: Uses Log-LLM (Large Language Model) integration to explain *why* a log is suspicious.
-- **🔮 Anomaly Detection**: Automatically flags unusual behavior using Isolation Forest algorithms.
-- **📊 Real-Time Dashboard**: Visualize threats and logs in an interactive Streamlit Command Center.
+- **🔮 Anomaly Detection**: Automatically flags unusual behavior using configurable Isolation Forest algorithms.
+- **🛡️ Automated Mitigation**: *Sentinel-AI* actively intercepts brute-force and privilege escalation attacks, simulating IAM and IP-level blocks.
+- **📈 Splunk Integration**: Real-time HTTP Event Collector (HEC) forwarding for native exploration within Splunk Enterprise.
 - **🔍 Elastic Storage**: Stores millions of logs for instant retrieval and forensic search.
 
 ---
@@ -30,28 +31,28 @@ Welcome to the **Next-Gen AI SIEM** (Security Information and Event Management) 
     ```    
 
 2.  **Configure Environment**
-    Create a `.env` file to secure your installation (optional but recommended):
+    Copy the provided `.env.example` file to `.env` to configure your installation:
     ```bash
-    # Create a new file named .env and add:
-    API_KEY=my-secret-admin-key
-    ES_PASSWORD=secure-password
+    cp .env.example .env
     ```
+    *Open `.env` in a text editor and fill in your secrets. The system will not start unless the `API_KEY` is set!*
 
 3.  **Run with Docker (Recommended)**
     Start the entire system with one command:
     ```bash
     docker-compose up --build -d
     ```
-    *This will start Elasticsearch, the SIEM Engine, and the API.*
+    *This will start Elasticsearch, Splunk Enterprise, and the SIEM API Engine inside an isolated Docker network.*
 
 ---
 
 ## 🎮 How to Use
 
-### 1. accessing the Dashboard
-Once running, open your browser and access the API or Dashboard (if configured separately):
-- **API Docs**: `http://localhost:8000/docs`
-- **Health Check**: `http://localhost:8000/health`
+### 1. Accessing the Interfaces
+Once running, open your browser to access the dashboards:
+- **SIEM API Docs**: `http://localhost:8001/docs` *(Requires API Key Authorization)*
+- **SIEM Health Check**: `http://localhost:8001/health`
+- **Splunk Enterprise**: `http://localhost:8000` *(Log in with `admin` and your `SPLUNK_PASSWORD`)*
 
 ### 2. Monitoring Logs
 The system automatically monitors logs defined in `config.py` (default: `test_logs.txt` on Windows, `/var/log/syslog` on Linux).
@@ -64,7 +65,7 @@ To simulate a threat, add a suspicious log line to `test_logs.txt`:
 ### 3. Checking Alerts
 Use the API to fetch security alerts:
 ```bash
-curl -H "X-API-Key: my-secret-admin-key" http://localhost:8000/alerts?severity=high
+curl -H "X-API-Key: your-secure-api-key" http://localhost:8001/alerts?severity=high
 ```
 
 ---

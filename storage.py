@@ -1,86 +1,130 @@
-from elasticsearch import AsyncElasticsearch, helpers
-from typing import Dict, Any, List
 import logging
-from config import Config 
+from typing import Any
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+from elasticsearch import AsyncElasticsearch, NotFoundError, helpers
+
+from config import Config
+
+logger = logging.getLogger(__name__)
+
+# Index mapping – centralised here so any schema change is a single-file edit
+_INDEX_MAPPING: dict = {
+    "mappings": {
+        "properties": {
+            "timestamp":    {"type": "date"},
+            "source":       {"type": "keyword"},
+            "message":      {"type": "text"},
+            "ip":           {"type": "ip"},
+            "severity":     {"type": "keyword"},
+            "anomaly_score":{"type": "float"},
+            "ai_analysis":  {"type": "object", "enabled": False},
+            # raw_log is stored but not indexed – saves space, enables retrieval
+            "raw_log":      {"type": "text", "index": False},
+        }
+    }
+}
+
 
 class ElasticsearchStorage:
-    def __init__(self):
-        # Use passed-in values, which will come from Config via SIEMEngine
-        host = Config.ES_HOST
-        port = Config.ES_PORT
-        self.es = AsyncElasticsearch(
-            [f"http://{host}:{port}"],
-            basic_auth=(Config.ES_USER, Config.ES_PASSWORD),
-            verify_certs=False # For dev environments usually
-        )
-        self.index_name = Config.ES_INDEX_NAME
-    
-    async def initialize(self):
-        """Async initialization to create index"""
-        await self._create_index()
+    """
+    Async Elasticsearch storage backend.
 
-    async def _create_index(self):
-        """Create Elasticsearch index with proper mappings"""
-        mapping = {
-            "mappings": {
-                "properties": {
-                    "timestamp": {"type": "date"},
-                    "source": {"type": "keyword"},
-                    "message": {"type": "text"},
-                    "ip": {"type": "ip"},
-                    "severity": {"type": "keyword"}, # Use .keyword for aggregation
-                    "anomaly_score": {"type": "float"},
-                    "ai_analysis": { # Store AI analysis as an object
-                        "type": "object", 
-                        "enabled": False # Don't index sub-fields by default
-                    },
-                    "raw_log": {"type": "text", "index": False} # No need to search raw log
-                }
-            }
-        }
-        try:
-            exists = await self.es.indices.exists(index=self.index_name)
-            if not exists:
-                await self.es.indices.create(index=self.index_name, body=mapping)
-                logging.info(f"Created index: {self.index_name}")
-        except Exception as e:
-            logging.error(f"Failed to create index: {e}")
+    Lifecycle:
+        storage = ElasticsearchStorage()
+        await storage.initialize()   # creates the index if absent
+        ...
+        await storage.close()        # flush & close the connection pool
+    """
+
+    def __init__(self) -> None:
+        scheme = "https" if Config.ES_USE_TLS else "http"
+        self._es = AsyncElasticsearch(
+            [f"{scheme}://{Config.ES_HOST}:{Config.ES_PORT}"],
+            basic_auth=(Config.ES_USER, Config.ES_PASSWORD),
+            # TLS certificate verification:
+            #   True  – enforce in production (default when ES_USE_TLS=true)
+            #   False – disable only for local dev clusters without valid certs
+            verify_certs=Config.ES_USE_TLS,
+        )
+        self.index_name: str = Config.ES_INDEX_NAME
+
+    # Lifecycle
+
+    async def initialize(self) -> None:
+        """Create the index with mappings if it does not already exist."""
+        await self._create_index_if_missing()
+
+    async def close(self) -> None:
+        """Close the underlying connection pool gracefully."""
+        await self._es.close()
+
+    # Health
 
     async def is_connected(self) -> bool:
-        """Check if Elasticsearch is connected"""
-        return await self.es.ping()
-    
-    async def close(self):
-        """Close the async client"""
-        await self.es.close()
-
-    async def store_log(self, log_data: Dict[str, Any]):
-        """Store single log in Elasticsearch"""
+        """Return True if Elasticsearch responds to a ping."""
         try:
-            await self.es.index(index=self.index_name, document=log_data)
-        except Exception as e:
-            logging.error(f"Error storing log: {e}")
+            return await self._es.ping()
+        except Exception:
+            logger.warning("Elasticsearch ping failed", exc_info=True)
+            return False
 
-    async def store_bulk_logs(self, logs: List[Dict[str, Any]]):
-        """Store multiple logs efficiently"""
-        actions = [
-            {"_index": self.index_name, "_source": log} for log in logs
-        ]
-        if not actions:
+    # Write
+
+    async def store_log(self, log_data: dict[str, Any]) -> None:
+        """Index a single log document."""
+        try:
+            await self._es.index(index=self.index_name, document=log_data)
+        except Exception:
+            logger.error("Failed to store single log", exc_info=True)
+
+    async def store_bulk_logs(self, logs: list[dict[str, Any]]) -> None:
+        """Bulk-index a list of log documents. No-ops on empty input."""
+        if not logs:
             return
-            
+        actions = [{"_index": self.index_name, "_source": log} for log in logs]
         try:
-            await helpers.async_bulk(self.es, actions)
-        except Exception as e:
-            logging.error(f"Error storing bulk logs: {e}")
+            success, errors = await helpers.async_bulk(
+                self._es, actions, raise_on_error=False, stats_only=False
+            )
+            if errors:
+                logger.warning(
+                    "Bulk index completed with %d error(s): %s", len(errors), errors[:3]
+                )
+        except Exception:
+            logger.error("Bulk index operation failed", exc_info=True)
 
-    async def search_logs(self, query: Dict[str, Any], size: int = 100) -> List[Dict[str, Any]]:
-        """Search logs with given query"""
+    # Read
+
+    async def search_logs(
+        self, query: dict[str, Any], size: int = 100
+    ) -> list[dict[str, Any]]:
+        """
+        Execute an Elasticsearch query and return the matching _source documents.
+
+        `size` is capped at Config.MAX_SEARCH_RESULTS to prevent runaway queries.
+        """
+        capped_size = min(size, Config.MAX_SEARCH_RESULTS)
         try:
-            result = await self.es.search(index=self.index_name, body=query, size=size)
-            return [hit['_source'] for hit in result['hits']['hits']]
-        except Exception as e:
-            logging.error(f"Error searching logs: {e}")
+            result = await self._es.search(
+                index=self.index_name, body=query, size=capped_size
+            )
+            return [hit["_source"] for hit in result["hits"]["hits"]]
+        except NotFoundError:
+            logger.warning("Index '%s' not found during search", self.index_name)
             return []
+        except Exception:
+            logger.error("Search query failed", exc_info=True)
+            return []
+
+    # Private
+
+    async def _create_index_if_missing(self) -> None:
+        try:
+            exists = await self._es.indices.exists(index=self.index_name)
+            if not exists:
+                await self._es.indices.create(index=self.index_name, body=_INDEX_MAPPING)
+                logger.info("Created Elasticsearch index: %s", self.index_name)
+            else:
+                logger.debug("Index '%s' already exists; skipping creation", self.index_name)
+        except Exception:
+            logger.error("Failed to create index '%s'", self.index_name, exc_info=True)

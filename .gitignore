@@ -14,3 +14,4 @@ test_logs.txt
 # Testing & Docs
 .pytest_cache/
 site/
+.github/

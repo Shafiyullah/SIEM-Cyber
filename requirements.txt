@@ -1,18 +1,35 @@
+# Core async framework
+fastapi
+uvicorn[standard]
+pydantic
+
+# Data persistence
 elasticsearch[async]
+aiofiles
+
+# Data science / ML
 pandas
 numpy
 scikit-learn
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
-aiofiles
+
+# HTTP client (used by LLM integrations and Splunk sender)
+aiohttp
+
+# NLP / log sentiment analysis
 vaderSentiment
-pytest
-pytest-asyncio
+
+# Configuration
+python-dotenv
+
+# Observability dashboard
 streamlit
 altair
-aiohttp
+
+# Testing
+pytest
+pytest-asyncio
+
+# Documentation
 mkdocs
 mkdocs-material
 mkdocs-include-markdown-plugin

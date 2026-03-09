@@ -3,7 +3,6 @@ import pandas as pd
 import altair as alt
 from elasticsearch import Elasticsearch
 from config import Config
-import time
 
 # --- Configuration & Setup ---
 st.set_page_config(
@@ -56,9 +55,11 @@ st.markdown("""
 @st.cache_resource
 def get_es_client():
     try:
+        scheme = "https" if Config.ES_USE_TLS else "http"
         es = Elasticsearch(
-            [f"http://{Config.ES_HOST}:{Config.ES_PORT}"],
-            basic_auth=(Config.ES_USER, Config.ES_PASSWORD)
+            [f"{scheme}://{Config.ES_HOST}:{Config.ES_PORT}"],
+            basic_auth=(Config.ES_USER, Config.ES_PASSWORD),
+            verify_certs=Config.ES_USE_TLS
         )
         if es.ping():
             return es

@@ -1,43 +1,114 @@
+# docker-compose.yml
+#
+# Brings up three services on an isolated internal network:
+#   elasticsearch  – log storage
+#   splunk         – SIEM event viewer + HEC ingestion endpoint
+#   siem           – this application (FastAPI + SIEM engine)
+#
+# Required environment variables (define in your .env file):
+#   API_KEY            – SIEM REST API bearer token
+#   ELASTIC_PASSWORD   – Elasticsearch admin password
+#   SPLUNK_PASSWORD    – Splunk admin password
+#   SPLUNK_HEC_TOKEN   – Splunk HTTP Event Collector token
+#
+# Start:  docker compose up -d --build
+# Stop:   docker compose down -v   (add -v to also remove data volumes)
+
 version: '3.8'
+
+networks:
+  siem-net:
+    driver: bridge
+
 services:
+
+  # ── Elasticsearch ────────────────────────────────────────────────────────────
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.1
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    networks:
+      - siem-net
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:?ELASTIC_PASSWORD must be set in .env}
     ports:
       - "9200:9200"
     volumes:
       - esdata:/usr/share/elasticsearch/data
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1" ]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "curl -sf -u elastic:$$ELASTIC_PASSWORD http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 15s
+      timeout: 10s
       retries: 10
+      start_period: 30s
 
+  # ── Splunk ───────────────────────────────────────────────────────────────────
+  splunk:
+    image: splunk/splunk:9.1.1
+    networks:
+      - siem-net
+    environment:
+      - SPLUNK_START_ARGS=--accept-license
+      - SPLUNK_PASSWORD=${SPLUNK_PASSWORD:?SPLUNK_PASSWORD must be set in .env}
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:?SPLUNK_HEC_TOKEN must be set in .env}
+    ports:
+      - "8000:8000"   # Splunk Web UI
+      - "8088:8088"   # Splunk HEC (HTTP Event Collector)
+    volumes:
+      - splunkdata:/opt/splunk/etc
+      - splunkvar:/opt/splunk/var
+    healthcheck:
+      # HEC /health endpoint returns 200 when the collector is ready
+      test: ["CMD-SHELL", "curl -sf http://localhost:8088/services/collector/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+
+  # ── SIEM Application ─────────────────────────────────────────────────────────
   siem:
     build: .
+    networks:
+      - siem-net
     ports:
-      - "8000:8000"
+      # SIEM API exposed on host 8001 to avoid conflict with Splunk Web on 8000
+      - "8001:8000"
     environment:
+      # Elasticsearch connection
       - ES_HOST=elasticsearch
       - ES_PORT=9200
       - ES_USER=elastic
-      - ES_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - ES_PASSWORD=${ELASTIC_PASSWORD:?ELASTIC_PASSWORD must be set in .env}
       - ES_INDEX_NAME=${ES_INDEX_NAME:-siem_logs}
+      - ES_USE_TLS=false
+      # Log sources (mounted read-only below)
       - LOG_SOURCES=/var/log/syslog,/var/log/auth.log
-      - API_KEY=${API_KEY}
+      # API key (REQUIRED – no fallback in production)
+      - API_KEY=${API_KEY:?API_KEY must be set in .env}
+      # Splunk HEC – service name resolves within siem-net
+      - SPLUNK_HEC_URL=http://splunk:8088/services/collector/event
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:?SPLUNK_HEC_TOKEN must be set in .env}
+      # Anomaly detection tuning
+      - ANOMALY_THRESHOLD=${ANOMALY_THRESHOLD:--0.5}
+      - ANOMALY_CONTAMINATION=${ANOMALY_CONTAMINATION:-0.1}
+      - TRAINING_DAYS=${TRAINING_DAYS:-7}
     volumes:
+      # Read-only host log mount – principle of least privilege
       - /var/log:/var/log:ro
     depends_on:
       elasticsearch:
         condition: service_healthy
+      splunk:
+        condition: service_healthy
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 20s
+    restart: unless-stopped
 
 volumes:
   esdata:
+  splunkdata:
+  splunkvar:
