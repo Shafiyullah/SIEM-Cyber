@@ -1,85 +1,114 @@
-# 🛡️ AI-Powered SIEM System
+# 🛡️ Sentinel-AI SIEM System
 
-Welcome to the **Next-Gen AI SIEM** (Security Information and Event Management) project. This system is designed to secure your infrastructure by collecting, analyzing, and detecting anomalies in system logs using advanced Machine Learning and AI.
+Welcome to the **Next-Gen AI SIEM** (Security Information and Event Management) project. Built in Python, this system is designed to secure your infrastructure by collecting, analyzing, and detecting anomalies in system logs in real-time, utilizing Machine Learning, Large Language Models, and advanced rule engines.
+
+This project was recently **upgraded from a prototype to a production-ready application** featuring robust error handling, secure credential management, asynchronous processing, and a microservices Docker architecture.
 
 ## 🚀 Key Features
 
-- **⚡ High Performance**: Built on a fully asynchronous architecture for maximum speed and throughput.
-- **🧠 AI Analysis**: Uses Log-LLM (Large Language Model) integration to explain *why* a log is suspicious.
-- **🔮 Anomaly Detection**: Automatically flags unusual behavior using configurable Isolation Forest algorithms.
-- **🛡️ Automated Mitigation**: *Sentinel-AI* actively intercepts brute-force and privilege escalation attacks, simulating IAM and IP-level blocks.
-- **📈 Splunk Integration**: Real-time HTTP Event Collector (HEC) forwarding for native exploration within Splunk Enterprise.
-- **🔍 Elastic Storage**: Stores millions of logs for instant retrieval and forensic search.
+*   **⚡ High-Performance Async Architecture:** Built on FastAPI, `asyncio`, and `aiohttp`. Capable of handling massive log ingestion without blocking the event loop.
+*   **🧠 LLM-Driven Threat Intelligence:** Leverages Large Language Models (Gemini/Ollama) to perform heuristic contextual analysis, explaining the *intent* behind logs and offering actionable remediation advice.
+*   **🔮 Machine Learning Anomaly Detection:** Uses `scikit-learn`'s Isolation Forest algorithm to detect deviations from baseline system behavior in real-time.
+*   **🚨 Stateful Rule Engine:** Tracks frequency-based threats (e.g., Brute Force, Credential Stuffing, Privilege Escalation) using sliding time windows to prevent alert fatigue.
+*   **🛑 Automated Mitigation:** *Sentinel-AI* actively intercepts critical threats, simulating IAM revocation and IP-level firewall blocks via a dedicated fire-and-forget mitigation subsystem.
+*   **📊 Observability & Storage:** 
+    *   **Elasticsearch:** Primary durable storage for forensic search and historical data correlation (with TLS enforcement).
+    *   **Splunk Integration:** Asynchronous HTTP Event Collector (HEC) forwarding for native exploration within Splunk Enterprise.
+    *   **Streamlit Dashboard:** A live, glassmorphism-styled command center for monitoring threats and viewing AI insights.
 
 ---
 
-## 📥 How to Download & Install
+## 🏗️ Architecture Stack
+
+*   **Core Logic:** Python 3.11+
+*   **API Layer:** FastAPI, Uvicorn, Pydantic
+*   **Data Science:** Pandas, NumPy, Scikit-Learn, VADER Sentiment
+*   **Infrastructure:** Docker Compose, Elasticsearch (Async), Splunk
+*   **UI:** Streamlit, Altair
+
+---
+
+## 📥 Installation & Quick Start
 
 ### Prerequisites
-- **Docker Desktop**: [Download Here](https://www.docker.com/products/docker-desktop/)
-- **Git**: [Download Here](https://git-scm.com/downloads)
+*   **Docker Desktop:** [Download Here](https://www.docker.com/products/docker-desktop/)
+*   **Git:** [Download Here](https://git-scm.com/downloads)
 
-### Installation Steps
+### 1. Clone the Repository
+```bash
+git clone https://github.com/Shafiyullah/siem-cyber.git
+cd siem-cyber
+```
 
-1.  **Clone the Repository**
-    Open your terminal (PowerShell or Command Prompt) and run:
-    ```bash
-    git clone https://github.com/Shafiyullah/siem-cyber.git
-    ```
-    ```bash
-    cd siem-cyber
-    ```    
+### 2. Configure the Environment
+The application is strictly governed by environment variables to prevent accidental secret leaks.
 
-2.  **Configure Environment**
-    Copy the provided `.env.example` file to `.env` to configure your installation:
+1.  Copy the provided secure template:
     ```bash
     cp .env.example .env
     ```
-    *Open `.env` in a text editor and fill in your secrets. The system will not start unless the `API_KEY` is set!*
+2.  Open `.env` in your text editor and fill in your actual secrets, API keys, and passwords.
+3.  *Note: The system will refuse to start if critical variables (like `API_KEY`) are missing.*
 
-3.  **Run with Docker (Recommended)**
-    Start the entire system with one command:
-    ```bash
-    docker-compose up --build -d
-    ```
-    *This will start Elasticsearch, Splunk Enterprise, and the SIEM API Engine inside an isolated Docker network.*
+### 3. Run with Docker Compose
+Start the entire microservices stack (SIEM Engine, Elasticsearch, and Splunk) inside an isolated Docker network:
+
+```bash
+docker-compose up --build -d
+```
+*Wait ~60 seconds for Elasticsearch and Splunk to fully initialize and pass their health checks.*
 
 ---
 
 ## 🎮 How to Use
 
 ### 1. Accessing the Interfaces
-Once running, open your browser to access the dashboards:
-- **SIEM API Docs**: `http://localhost:8001/docs` *(Requires API Key Authorization)*
-- **SIEM Health Check**: `http://localhost:8001/health`
-- **Splunk Enterprise**: `http://localhost:8000` *(Log in with `admin` and your `SPLUNK_PASSWORD`)*
+Once the Docker containers are healthy, you can access the following services:
 
-### 2. Monitoring Logs
-The system automatically monitors logs defined in `config.py` (default: `test_logs.txt` on Windows, `/var/log/syslog` on Linux).
-To simulate a threat, add a suspicious log line to `test_logs.txt`:
-```text
-2025-01-01T12:00:00 Failed password for user root from 192.168.1.50 port 22 ssh2
-```
-*The system will detect this within seconds!*
+*   **Sentinel-AI API Docs:** `http://localhost:8001/docs` *(Requires the `API_KEY` you set in `.env`)*
+*   **Streamlit Command Center:** `http://localhost:8501`
+*   **Splunk Enterprise:** `http://localhost:8000` *(Log in with `admin` and your `SPLUNK_PASSWORD`)*
+*   **Elasticsearch (Sanity Check):** `https://localhost:9200` *(Or `http://` if you disabled TLS)*
 
-### 3. Checking Alerts
-Use the API to fetch security alerts:
+### 2. Simulating Log Ingestion
+By default, the collector tails the files defined in your `LOG_SOURCES` environment variable (e.g., `./test_logs.txt`).
+
+Trigger a brute-force rule by appending to your test log file:
 ```bash
-curl -H "X-API-Key: your-secure-api-key" http://localhost:8001/alerts?severity=high
+echo "2026-01-01T12:00:00 Failed password for invalid user from 192.168.1.50 port 22 ssh2" >> test_logs.txt
+echo "2026-01-01T12:00:01 Failed password for invalid user from 192.168.1.50 port 22 ssh2" >> test_logs.txt
+echo "2026-01-01T12:00:02 Failed password for invalid user from 192.168.1.50 port 22 ssh2" >> test_logs.txt
+echo "2026-01-01T12:00:03 Failed password for invalid user from 192.168.1.50 port 22 ssh2" >> test_logs.txt
+echo "2026-01-01T12:00:04 Failed password for invalid user from 192.168.1.50 port 22 ssh2" >> test_logs.txt
 ```
+
+### 3. Fetching Alerts
+Query the API to fetch processed security alerts:
+```bash
+curl -H "X-API-Key: <YOUR_API_KEY>" "http://localhost:8001/alerts?severity=high&limit=10"
+```
+
+---
+
+## 🔒 Security Posture
+
+*   **Secret Management:** No hardcoded credentials. Enforced use of `.env` files via `Config` validation.
+*   **Authentication:** API routes protected by constant-time secret comparison (`secrets.compare_digest`).
+*   **Input Validation:** Strict Pydantic models with path-traversal guards and payload size limits to prevent DoS.
+*   **Network Isolation:** Docker services run on a dedicated bridged network (`siem-net`).
+*   **Defense in Depth:** TLS enforcement capabilities for database connections (`ES_USE_TLS`).
 
 ---
 
 ## 🛠️ Troubleshooting
 
-- **"Connection Refused"**: Ensure Docker is running (`docker ps`). Wait 30 seconds for Elasticsearch to fully start.
-- **"No Logs Found"**: Check if `test_logs.txt` exists and has data. The system waits for this file to be created.
-- **"Memory Error"**: Elasticsearch uses significant RAM. Ensure Docker has at least 4GB allocated.
+*   **Container Crash (`siem-api` keeps restarting):** The most common cause is a missing or invalid `.env` file. Check the logs: `docker logs siem-api`.
+*   **Splunk Connection Errors:** Ensure the `SPLUNK_HEC_TOKEN` in your `.env` exactly matches the token you've configured inside the Splunk UI.
+*   **Elasticsearch Verification Failed:** If you left `ES_USE_TLS=true` in development without proper certificates, set it to `false` in `.env` and restart.
 
 ---
 
 ## 🤝 Contributing
-We welcome contributions! Please fork the repo and submit a Pull Request.
+Contributions, issues, and feature requests are welcome!
 
----
 *Built with ❤️ for Cyber Security.*
